@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+# This command can be run by the user to clang-format everything.
+
+PLATFORM=$(uname)
+TOOLSPATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+CLANGFORMAT="${TOOLSPATH}/${PLATFORM}/clang-format"
+
+while IFS="" read -d $'\0' -r f ; do
+    "${CLANGFORMAT}" -style=file -i "${f}"
+done < <(find include src tests/unit \( -name '*.cpp' -o -name '*.h' -o -name '*.cu' \) -print0)

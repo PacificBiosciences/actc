@@ -1,0 +1,4 @@
+[wrap-git]
+directory=pancake
+url=https://github.com/PacificBiosciences/pancake
+revision=develop
