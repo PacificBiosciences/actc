@@ -4,7 +4,9 @@
 #include <pbbam/BamReader.h>
 #include <pbbam/BamWriter.h>
 #include <pbbam/DataSet.h>
+#include <pbbam/EntireFileQuery.h>
 #include <pbbam/FastaWriter.h>
+#include <pbbam/PbiFilterQuery.h>
 #include <pbbam/PbiRawData.h>
 #include <pbcopper/cli2/CLI.h>
 #include <pbcopper/cli2/internal/BuiltinOptions.h>
@@ -14,22 +16,37 @@
 #include <pbcopper/utility/Ssize.h>
 #include <pbcopper/utility/Stopwatch.h>
 #include <boost/algorithm/string.hpp>
+#include <boost/lexical_cast.hpp>
 
 #include <cstdint>
 #include <cstdlib>
+#include <memory>
 #include <string>
 #include <thread>
 #include <unordered_map>
 #include <utility>
 
 namespace PacBio {
-
+namespace OptionNames {
+// clang-format off
+const CLI_v2::Option Chunk {
+R"({
+    "names" : ["chunk"],
+    "description" : "Operate on a single chunk. Format i/N, where i in [1,N]. Examples: 3/24 or 9/9",
+    "type" : "string",
+    "default" : ""
+})"
+};
+// clang-format on
+}  // namespace OptionNames
 struct DaiDaiSettings
 {
     std::string InputCLRFile;
     std::string InputCCSFile;
     std::string OutputAlignmentFile;
     int32_t NumThreads = 1;
+    int32_t ChunkCur = -1;
+    int32_t ChunkAll = -1;
 };
 
 CLI_v2::Interface CreateCLI()
@@ -66,6 +83,7 @@ CLI_v2::Interface CreateCLI()
         "required" : true
     })"};
     i.AddPositionalArguments({InputCLRFile, InputCCSFile, Output});
+    i.AddOption(OptionNames::Chunk);
 
     return i;
 }
@@ -148,6 +166,34 @@ int RunnerSubroutine(const CLI_v2::Results& options)
     settings.OutputAlignmentFile = files[2];
     settings.NumThreads = options.NumThreads();
 
+    const std::string chunk = options[OptionNames::Chunk];
+    const auto ChunkErrorAndDie = [&]() {
+        PBLOG_FATAL << "Wrong format for --chunk, please provide two integers separated by a slash "
+                       "like 2/10. First number must be less than the second number. Both must be "
+                       "positive and greater than 0.";
+        std::exit(EXIT_FAILURE);
+    };
+    if (!chunk.empty()) {
+        if (boost::find_first(chunk, "/")) {
+            std::vector<std::string> splits;
+            boost::split(splits, chunk, boost::is_any_of("/"));
+            if (splits.size() != 2) {
+                ChunkErrorAndDie();
+            }
+            try {
+                settings.ChunkCur = boost::lexical_cast<float>(splits[0]);
+                settings.ChunkAll = boost::lexical_cast<float>(splits[1]);
+                if (settings.ChunkCur > settings.ChunkAll || settings.ChunkCur <= 0 ||
+                    settings.ChunkAll <= 0)
+                    ChunkErrorAndDie();
+            } catch (boost::bad_lexical_cast&) {
+                ChunkErrorAndDie();
+            }
+        } else {
+            ChunkErrorAndDie();
+        }
+    }
+
     const auto clrFiles = BAM::DataSet(settings.InputCLRFile).BamFiles();
     if (clrFiles.size() != 1) {
         PBLOG_FATAL << "CLR input must be exactly one BAM file! Found " << clrFiles.size();
@@ -198,8 +244,63 @@ int RunnerSubroutine(const CLI_v2::Results& options)
 
     const std::string ccsFileName = ccsFiles[0].Filename();
 
-    BAM::BamReader reader{ccsFileName};
-    BAM::BamHeader header = reader.Header().DeepCopy();
+    auto filter = BAM::PbiFilter::FromDataSet(ccsFileName);
+    if (settings.ChunkCur != -1) {
+        if (!ccsFiles[0].PacBioIndexExists()) {
+            PBLOG_FATAL
+                << "PBI file is missing for input BAM file! Please create one using pbindex!";
+            std::exit(EXIT_FAILURE);
+        }
+        const BAM::PbiRawData index{ccsFiles[0].PacBioIndexFilename()};
+        const auto& zmwsUniq = index.BasicData().holeNumber_;
+        const int32_t numRecords = zmwsUniq.size();
+        if (numRecords == 0) {
+            PBLOG_FATAL << "InputDataError", "No input records in PBI file!";
+            std::exit(EXIT_FAILURE);
+        }
+
+        const bool firstChunk = settings.ChunkCur == 1;
+        const bool lastChunk = settings.ChunkCur == settings.ChunkAll && settings.ChunkAll > 0;
+        if (settings.ChunkCur > 0 && settings.ChunkAll > 0) {
+            if (!filter.IsEmpty()) {
+                PBLOG_FATAL << "Cannot combine dataset filters with --chunk. Please use ZMW "
+                               "chunking via dataset filters or remove filters from dataset.";
+            }
+
+            int numZmwsAll = zmwsUniq.size();
+            if (numZmwsAll < settings.ChunkAll) {
+                PBLOG_FATAL << "Fewer ZMWs available than specified chunks: " << numZmwsAll
+                            << " vs. " << settings.ChunkAll;
+            }
+            const double chunkSize = 1.0 * numZmwsAll / settings.ChunkAll;
+            const int32_t firstChunkIdx =
+                firstChunk ? 0 : std::round(chunkSize * (settings.ChunkCur - 1));
+            int32_t startZmw = zmwsUniq[firstChunkIdx];
+            const int32_t lastChunkIdx =
+                lastChunk ? zmwsUniq.size() - 1 : std::round(chunkSize * (settings.ChunkCur));
+            int32_t endZmw = zmwsUniq[lastChunkIdx];
+            int32_t numZmws = lastChunkIdx - firstChunkIdx + static_cast<int32_t>(lastChunk);
+            PBLOG_INFO << "Chunk index : " << settings.ChunkCur << '/' << settings.ChunkAll;
+            PBLOG_INFO << "ZMW range   : [" << startZmw << ',' << endZmw << (lastChunk ? ']' : ')');
+            PBLOG_INFO << "#ZMWs       : " << numZmws;
+
+            const BAM::PbiZmwFilter startFilter{startZmw, BAM::Compare::GREATER_THAN_EQUAL};
+            const BAM::PbiZmwFilter endFilter{
+                endZmw, lastChunk ? BAM::Compare::LESS_THAN_EQUAL : BAM::Compare::LESS_THAN};
+            filter = BAM::PbiFilter::Intersection({startFilter, endFilter});
+        }
+    }
+    std::unique_ptr<BAM::internal::IQuery> reader;
+    if (filter.IsEmpty())
+        reader = std::make_unique<BAM::EntireFileQuery>(ccsFileName);
+    else
+        reader = std::make_unique<BAM::PbiFilterQuery>(filter, ccsFileName);
+
+    const auto GetHeader = [&ccsFileName]() {
+        BAM::BamReader reader{ccsFileName};
+        return reader.Header().DeepCopy();
+    };
+    BAM::BamHeader header = GetHeader();
     int32_t numCcsReads = 0;
     {
         std::string outputFastaName = settings.OutputAlignmentFile;
@@ -239,7 +340,7 @@ int RunnerSubroutine(const CLI_v2::Results& options)
     };
 
     int32_t curCcsIdx = 0;
-    for (const auto& ccsRecord : reader) {
+    for (const auto& ccsRecord : *reader) {
         PBLOG_DEBUG << "CCS : " << ccsRecord.FullName();
         const int32_t holeNumber = ccsRecord.HoleNumber();
         if (clrRecord.HoleNumber() != holeNumber) {
