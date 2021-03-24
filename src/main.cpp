@@ -291,11 +291,15 @@ int RunnerSubroutine(const CLI_v2::Results& options)
             filter = BAM::PbiFilter::Intersection({startFilter, endFilter});
         }
     }
-    std::unique_ptr<BAM::internal::IQuery> reader;
-    if (filter.IsEmpty())
-        reader = std::make_unique<BAM::EntireFileQuery>(ccsFileName);
-    else
-        reader = std::make_unique<BAM::PbiFilterQuery>(filter, ccsFileName);
+
+    const auto CreateCCSReader = [&]() -> std::unique_ptr<BAM::internal::IQuery> {
+        if (filter.IsEmpty())
+            return std::make_unique<BAM::EntireFileQuery>(ccsFileName);
+        else
+            return std::make_unique<BAM::PbiFilterQuery>(filter, ccsFileName);
+    };
+
+    // std::unique_ptr<BAM::internal::IQuery> reader = CreateCCSReader();
 
     const auto GetHeader = [&ccsFileName]() {
         BAM::BamReader reader{ccsFileName};
@@ -307,7 +311,8 @@ int RunnerSubroutine(const CLI_v2::Results& options)
         std::string outputFastaName = settings.OutputAlignmentFile;
         boost::replace_all(outputFastaName, ".bam", ".fasta");
         BAM::FastaWriter fasta{outputFastaName};
-        for (const auto& ccsRecord : BAM::BamReader{ccsFileName}) {
+        const auto ccsReader = CreateCCSReader();
+        for (const auto& ccsRecord : *ccsReader) {
             const std::string seq = ccsRecord.Sequence();
             const std::string name = ccsRecord.FullName();
             header.AddSequence({name, std::to_string(seq.size())});
@@ -342,7 +347,8 @@ int RunnerSubroutine(const CLI_v2::Results& options)
     };
 
     int32_t curCcsIdx = 0;
-    for (const auto& ccsRecord : *reader) {
+    const auto ccsReader = CreateCCSReader();
+    for (const auto& ccsRecord : *ccsReader) {
         PBLOG_DEBUG << "CCS : " << ccsRecord.FullName();
         const int32_t holeNumber = ccsRecord.HoleNumber();
         if (clrRecord.HoleNumber() != holeNumber) {
