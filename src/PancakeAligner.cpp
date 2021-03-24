@@ -61,7 +61,6 @@ Pancake::MapperCLRMapSettings InitPancakeMapSettingsSubread(const bool shortInse
     settings.seedParams.MinimizerWindow = 5;
     settings.seedParams.Spacing = 0;
     settings.seedParams.UseHPCForSeedsOnly = true;
-    settings.seedParams.MaxHPCLen = 100;
 
     settings.secondaryAllowedOverlapFractionQuery = 0.0;
     settings.secondaryAllowedOverlapFractionTarget = 0.5;
