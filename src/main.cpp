@@ -316,9 +316,10 @@ int RunnerSubroutine(const CLI_v2::Results& options)
         }
     }
 
-    BAM::BamWriter writer(settings.OutputAlignmentFile, header);
+    BAM::BamWriter writer(settings.OutputAlignmentFile, header, BAM::BamWriter::DefaultCompression,
+                          8);
 
-    Parallel::WorkQueue<std::vector<BAM::BamRecord>> workQueue(settings.NumThreads, 3);
+    Parallel::WorkQueue<std::vector<BAM::BamRecord>> workQueue(settings.NumThreads, 10);
     std::future<void> workerThread = std::async(std::launch::async, WorkerThread,
                                                 std::ref(workQueue), std::ref(writer), numCcsReads);
 
