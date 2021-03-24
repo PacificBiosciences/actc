@@ -20,6 +20,7 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <iomanip>
 #include <memory>
 #include <string>
 #include <thread>
