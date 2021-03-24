@@ -256,7 +256,7 @@ int RunnerSubroutine(const CLI_v2::Results& options)
         const auto& zmwsUniq = index.BasicData().holeNumber_;
         const int32_t numRecords = zmwsUniq.size();
         if (numRecords == 0) {
-            PBLOG_FATAL << "InputDataError", "No input records in PBI file!";
+            PBLOG_FATAL << "InputDataError: No input records in PBI file!";
             std::exit(EXIT_FAILURE);
         }
 
