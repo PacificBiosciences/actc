@@ -301,11 +301,7 @@ int RunnerSubroutine(const CLI_v2::Results& options)
 
     // std::unique_ptr<BAM::internal::IQuery> reader = CreateCCSReader();
 
-    const auto GetHeader = [&ccsFileName]() {
-        BAM::BamReader reader{ccsFileName};
-        return reader.Header().DeepCopy();
-    };
-    BAM::BamHeader header = GetHeader();
+    BAM::BamHeader header = clrFile.Header().DeepCopy();
     int32_t numCcsReads = 0;
     {
         std::string outputFastaName = settings.OutputAlignmentFile;
