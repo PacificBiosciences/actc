@@ -1,14 +1,14 @@
 project(
   'actc',
-  'cpp',
+  ['cpp'],
   version : '0.0.3',
   default_options : [
     'buildtype=release',
     'warning_level=3',
-    'cpp_std=c++17',
+    'cpp_std=c++20',
     'b_ndebug=if-release'],
   license : 'BSD-3',
-  meson_version : '>= 0.52.0')
+  meson_version : '>= 0.57.0')
 
 # CXXFLAGS
 actc_flags = []
