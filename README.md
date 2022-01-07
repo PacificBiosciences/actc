@@ -44,3 +44,17 @@ To generate the BAM index
 
     pbindex movie.ccs.bam
     pbindex movie.subreads.bam
+
+# Changelog
+  * **0.1.0 (unreleased)**
+    * Add _actc_ `@PG` to BAM header
+    * Auto generate version from `meson.build`
+    * Improve (de)compression, ergo throughput, by threading
+  * 0.0.3
+    * Use subreads read groups
+    * Fix FASTA output for `--chunk`
+    * Initial attempt to increase throughput
+  * 0.0.2
+    * Add `--chunk` capabilities
+  * 0.0.1
+    * Intial release
