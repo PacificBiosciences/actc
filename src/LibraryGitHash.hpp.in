@@ -1,0 +1,9 @@
+#pragma once
+
+namespace PacBio {
+namespace Actc {
+
+constexpr const char LibraryGitSha1[] = "@ACTC_GIT_SHA1@";
+
+}  // namespace Actc
+}  // namespace PacBio

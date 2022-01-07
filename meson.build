@@ -1,7 +1,7 @@
 project(
   'actc',
   ['cpp'],
-  version : '0.0.3',
+  version : '0.0.99',
   default_options : [
     'buildtype=release',
     'warning_level=3',
@@ -48,18 +48,4 @@ actc_lib_deps = [
   actc_pancake_dep,
 ]
 
-actc_src_include_directories = include_directories('src')
-
-# sources + executable
-actc_main = executable(
-  'actc',
-  files([
-    'src/main.cpp',
-    'src/AlignmentResult.cpp',
-    'src/AlignerUtils.cpp',
-    'src/PancakeAligner.cpp',
-  ]),
-  install : true,
-  dependencies : actc_lib_deps,
-  include_directories : actc_src_include_directories,
-  cpp_args : actc_flags)
+subdir('src')

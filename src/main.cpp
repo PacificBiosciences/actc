@@ -1,11 +1,14 @@
 #include "AlignmentResult.hpp"
+#include "LibraryInfo.hpp"
 #include "PancakeAligner.hpp"
 
+#include <htslib/hts.h>
 #include <pbbam/BamReader.h>
 #include <pbbam/BamWriter.h>
 #include <pbbam/DataSet.h>
 #include <pbbam/EntireFileQuery.h>
 #include <pbbam/FastaWriter.h>
+#include <pbbam/PbbamVersion.h>
 #include <pbbam/PbiFilterQuery.h>
 #include <pbbam/PbiRawData.h>
 #include <pbcopper/cli2/CLI.h>
@@ -13,10 +16,13 @@
 #include <pbcopper/logging/Logging.h>
 #include <pbcopper/parallel/WorkQueue.h>
 #include <pbcopper/utility/MemoryConsumption.h>
+#include <pbcopper/utility/PbcopperVersion.h>
 #include <pbcopper/utility/Ssize.h>
 #include <pbcopper/utility/Stopwatch.h>
+#include <zlib.h>
 #include <boost/algorithm/string.hpp>
 #include <boost/lexical_cast.hpp>
+#include <boost/version.hpp>
 
 #include <cstdint>
 #include <cstdlib>
@@ -53,8 +59,7 @@ struct DaiDaiSettings
 CLI_v2::Interface CreateCLI()
 {
     static const std::string description{"Align clr to ccs reads."};
-    const auto version = "0.0.1";
-    CLI_v2::Interface i{"actc", description, version};
+    CLI_v2::Interface i{"actc", description, Actc::LibraryInfo().Release};
 
     Logging::LogConfig logConfig;
     logConfig.Header = "| ";
@@ -86,6 +91,35 @@ CLI_v2::Interface CreateCLI()
     i.AddPositionalArguments({InputCLRFile, InputCCSFile, Output});
     i.AddOption(OptionNames::Chunk);
 
+    const auto printVersion = [](const CLI_v2::Interface& interface) {
+        const std::string actcVersion = []() {
+            return Actc::LibraryInfo().Release + " (commit " + Actc::LibraryInfo().GitSha1 + ')';
+        }();
+        const std::string pbbamVersion = []() { return BAM::LibraryFormattedVersion(); }();
+        const std::string pbcopperVersion = []() {
+            return Utility::LibraryVersionString() + " (commit " + Utility::LibraryGitSha1String() +
+                   ')';
+        }();
+        const std::string boostVersion = []() {
+            std::string v = BOOST_LIB_VERSION;
+            boost::replace_all(v, "_", ".");
+            return v;
+        }();
+        const std::string htslibVersion = []() { return std::string{hts_version()}; }();
+        const std::string zlibVersion = []() { return std::string{ZLIB_VERSION}; }();
+
+        std::cout << interface.ApplicationName() << " " << interface.ApplicationVersion() << '\n';
+        std::cout << '\n';
+        std::cout << "Using:\n";
+        std::cout << "  actc     : " << actcVersion << '\n';
+        std::cout << "  pbbam    : " << pbbamVersion << '\n';
+        std::cout << "  pbcopper : " << pbcopperVersion << '\n';
+        std::cout << "  boost    : " << boostVersion << '\n';
+        std::cout << "  htslib   : " << htslibVersion << '\n';
+        std::cout << "  zlib     : " << zlibVersion << '\n';
+    };
+    i.RegisterVersionPrinter(printVersion);
+
     return i;
 }
 
@@ -110,9 +144,17 @@ void WorkerThread(Parallel::WorkQueue<std::vector<BAM::BamRecord>>& queue, BAM::
     }
 }
 
+void SetBamReaderDecompThreads(const int32_t numThreads)
+{
+    static constexpr char BAMREADER_ENV[] = "PB_BAMREADER_THREADS";
+    const std::string decompThreads = std::to_string(numThreads);
+    setenv(BAMREADER_ENV, decompThreads.c_str(), true);
+}
+
 int RunnerSubroutine(const CLI_v2::Results& options)
 {
     Utility::Stopwatch globalTimer;
+    SetBamReaderDecompThreads(options.NumThreads());
 
     DaiDaiSettings settings;
     const std::vector<std::string> files = options.PositionalArguments();
@@ -299,8 +341,6 @@ int RunnerSubroutine(const CLI_v2::Results& options)
             return std::make_unique<BAM::PbiFilterQuery>(filter, ccsFileName);
     };
 
-    // std::unique_ptr<BAM::internal::IQuery> reader = CreateCCSReader();
-
     BAM::BamHeader header = clrFile.Header().DeepCopy();
     int32_t numCcsReads = 0;
     {
@@ -317,8 +357,14 @@ int RunnerSubroutine(const CLI_v2::Results& options)
         }
     }
 
+    BAM::ProgramInfo program("actc");
+    program.Name("actc")
+        .CommandLine(options.InputCommandLine())
+        .Version(Actc::LibraryInfo().Release);
+    header.AddProgram(program);
+
     BAM::BamWriter writer(settings.OutputAlignmentFile, header, BAM::BamWriter::DefaultCompression,
-                          8);
+                          settings.NumThreads);
 
     Parallel::WorkQueue<std::vector<BAM::BamRecord>> workQueue(settings.NumThreads, 10);
     std::future<void> workerThread = std::async(std::launch::async, WorkerThread,

@@ -1,0 +1,7 @@
+#pragma once
+
+namespace PacBio {
+namespace Actc {
+constexpr const char ReleaseVersion[] = "@ACTC_VERSION@";
+}  // namespace Actc
+}  // namespace PacBio
