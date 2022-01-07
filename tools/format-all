@@ -8,4 +8,4 @@ CLANGFORMAT="${TOOLSPATH}/${PLATFORM}/clang-format"
 
 while IFS="" read -d $'\0' -r f ; do
     "${CLANGFORMAT}" -style=file -i "${f}"
-done < <(find include src tests/unit \( -name '*.cpp' -o -name '*.h' -o -name '*.cu' \) -print0)
+done < <(find src \( -name '*.cpp' -o -name '*.h' -o -name '*.cu' \) -print0)
