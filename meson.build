@@ -1,7 +1,7 @@
 project(
   'actc',
   ['cpp'],
-  version : '0.1.0',
+  version : '0.1.0-99',
   default_options : [
     'buildtype=release',
     'warning_level=3',
