@@ -46,7 +46,7 @@ To generate the BAM index
     pbindex movie.subreads.bam
 
 # Changelog
-  * **0.1.0 (unreleased)**
+  * **0.1.0**
     * Add _actc_ `@PG` to BAM header
     * Auto generate version from `meson.build`
     * Improve (de)compression, ergo throughput, by threading
