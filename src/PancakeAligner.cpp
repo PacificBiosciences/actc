@@ -69,7 +69,16 @@ Pancake::MapperCLRMapSettings InitPancakeMapSettingsSubread(const bool shortInse
     settings.seedParamsFallback.KmerSize = 10;
     settings.seedParamsFallback.MinimizerWindow = 5;
 
+    // Filter out the top percentile of most frequent minimizers.
     settings.freqPercentile = 0.000;
+    // Determine the maximum occurrence cutoff automatically from the histogram so that all
+    // seed hits for a query can fit into this much memory. If <= 0, it's turned off.
+    settings.seedOccurrenceMaxMemory = 100'000'000;
+    // Limit the maximum occurrence of a seed to this. (Upper bound.) If <= 0, it's turned off.
+    settings.seedOccurrenceMax = 1000;
+    // Do not filter seeds with occurrences lower than this. (Lower bound.)
+    settings.seedOccurrenceMin = 10;
+
     settings.maxGap = 10000;
     settings.maxFlankExtensionDist = settings.maxGap;
     settings.minAlignmentSpan = 200;
