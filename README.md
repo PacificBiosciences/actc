@@ -1,11 +1,25 @@
-<h1 align="center"><img width="300px" src="actc.png"/></h1>
+<img width="200px" src="actc.png" align="right"/>
 <h1 align="center">actc</h1>
 <p align="center">Align clr to ccs reads.</p>
+
+***
 
 # What is this about?
 If you want to have one-click solution to align subreads to the respective CCS reads.
 
-# How to compile
+# How to install
+
+## Use bioconda
+
+```
+conda install -c bioconda actc
+```
+
+## Download binary directly
+
+  Get binary from [releases](https://github.com/PacificBiosciences/actc/releases) and make it executable.
+
+## Compile manually
 
     mkdir build && cd build
     meson --prefix ~/mytools
@@ -47,7 +61,7 @@ To generate the BAM index
 
 # Changelog
   * **0.2.0**
-    * Improve runtime for low-complexity molecules
+    * Improve runtime and reduce memory footprint for low-complexity molecules
   * 0.1.0
     * Add _actc_ `@PG` to BAM header
     * Auto generate version from `meson.build`
