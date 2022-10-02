@@ -1,6 +1,5 @@
 #include "PancakeAligner.hpp"
 
-#include <pacbio/pancake/MapperCLR.h>
 #include <pbbam/BamRecord.h>
 
 #include <cstdint>
@@ -79,8 +78,8 @@ Pancake::MapperCLRMapSettings InitPancakeMapSettingsSubread(const bool shortInse
     // Do not filter seeds with occurrences lower than this. (Lower bound.)
     settings.seedOccurrenceMin = 10;
 
-    settings.maxGap = 10000;
-    settings.maxFlankExtensionDist = settings.maxGap;
+    settings.seedJoinDist = 10000;
+    settings.maxFlankExtensionDist = settings.seedJoinDist;
     settings.minAlignmentSpan = 200;
 
     if (shortInsert) {

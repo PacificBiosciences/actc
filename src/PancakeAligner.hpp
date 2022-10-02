@@ -2,8 +2,8 @@
 
 #include "AlignmentResult.hpp"
 
-#include <pacbio/pancake/MapperCLR.h>
 #include <pbbam/BamRecord.h>
+#include <pancake/MapperCLR.hpp>
 
 #include <cstdint>
 #include <string>
