@@ -4,6 +4,7 @@
 #include "AlignerUtils.hpp"
 
 #include <cstddef>
+#include <iostream>
 #include <ostream>
 #include <stdexcept>
 #include <tuple>
@@ -157,16 +158,17 @@ BAM::BamRecord AlnToBam(const int32_t refId, const BAM::BamHeader& header,
                         const AlignmentResult& aln, const BAM::BamRecord& read)
 {
     BAM::BamRecord record{header};
-    record.Impl().SetSequenceAndQualities(read.Sequence());
-    record.Impl().Name(read.FullName());
-    record.Impl().Tags(read.Impl().Tags());
-    std::string cigarStr = aln.cigar.ToStdString();
+    std::string sequence{read.Sequence()};
+
     int clipStart = aln.rReversed ? aln.qLen - aln.qEnd : aln.qStart;
     int clipEnd = aln.rReversed ? aln.qStart : aln.qLen - aln.qEnd;
-    if (clipStart != 0) cigarStr = std::to_string(clipStart) + 'S' + cigarStr;
-    if (clipEnd != 0) cigarStr += std::to_string(clipEnd) + 'S';
+
+    sequence = sequence.substr(clipStart, sequence.length() - clipStart - clipEnd);
+    record.Impl().SetSequenceAndQualities(sequence);
+    record.Impl().Name(read.FullName());
+    record.Impl().Tags(read.Impl().Tags());
     record.Map(refId, aln.rStart, aln.rReversed ? BAM::Strand::REVERSE : BAM::Strand::FORWARD,
-               BAM::Cigar::FromStdString(cigarStr), aln.mapq);
+               aln.cigar, aln.mapq);
     return record;
 }
 
