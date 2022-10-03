@@ -160,15 +160,42 @@ BAM::BamRecord AlnToBam(const int32_t refId, const BAM::BamHeader& header,
     BAM::BamRecord record{header};
     std::string sequence{read.Sequence()};
 
-    int clipStart = aln.rReversed ? aln.qLen - aln.qEnd : aln.qStart;
-    int clipEnd = aln.rReversed ? aln.qStart : aln.qLen - aln.qEnd;
+    const bool rev{aln.rReversed};
+    int32_t clipStart = rev ? aln.qLen - aln.qEnd : aln.qStart;
+    int32_t clipEnd = rev ? aln.qStart : aln.qLen - aln.qEnd;
+
+    const int32_t frontIns{aln.cigar.front().Char() == 'I'};
+    const int32_t backIns{aln.cigar.back().Char() == 'I'};
+    auto cigar = aln.cigar;
+    if (frontIns || backIns) {
+        if (frontIns) {
+            if (!rev) {
+                clipStart += cigar.front().Length();
+            } else {
+                clipEnd += cigar.front().Length();
+            }
+        }
+        if (backIns) {
+            if (!rev) {
+                clipEnd += cigar.back().Length();
+            } else {
+                clipStart += cigar.back().Length();
+            }
+        }
+        decltype(cigar) newCigar;
+        newCigar.reserve(cigar.size() - frontIns - backIns);
+        for (int32_t i = frontIns; i < std::ssize(cigar) - backIns; ++i) {
+            newCigar.emplace_back(cigar[i]);
+        }
+        std::swap(newCigar, cigar);
+    }
 
     sequence = sequence.substr(clipStart, sequence.length() - clipStart - clipEnd);
     record.Impl().SetSequenceAndQualities(sequence);
     record.Impl().Name(read.FullName());
     record.Impl().Tags(read.Impl().Tags());
     record.Map(refId, aln.rStart, aln.rReversed ? BAM::Strand::REVERSE : BAM::Strand::FORWARD,
-               aln.cigar, aln.mapq);
+               cigar, aln.mapq);
     return record;
 }
 
