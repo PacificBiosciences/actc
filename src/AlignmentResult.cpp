@@ -161,8 +161,8 @@ BAM::BamRecord AlnToBam(const int32_t refId, const BAM::BamHeader& header,
     std::string sequence{read.Sequence()};
 
     const bool rev{aln.rReversed};
-    int32_t clipStart = rev ? aln.qLen - aln.qEnd : aln.qStart;
-    int32_t clipEnd = rev ? aln.qStart : aln.qLen - aln.qEnd;
+    int32_t clipStart = aln.qStart;
+    int32_t clipEnd = aln.qLen - aln.qEnd;
 
     const int32_t frontIns{aln.cigar.front().Char() == 'I'};
     const int32_t backIns{aln.cigar.back().Char() == 'I'};
