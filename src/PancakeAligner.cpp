@@ -102,7 +102,7 @@ Pancake::MapperCLRAlignSettings InitPancakeAlignSettingsSubread()
     settings.alnParamsGlobal.zdrop = 400;
     settings.alnParamsGlobal.zdrop2 = 200;
     settings.alnParamsGlobal.alignBandwidth = 500;
-    settings.alnParamsGlobal.endBonus = 1000;
+    settings.alnParamsGlobal.endBonus = 0;
     settings.alnParamsGlobal.matchScore = 2;
     settings.alnParamsGlobal.mismatchPenalty = 4;
     settings.alnParamsGlobal.gapOpen1 = 4;
