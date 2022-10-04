@@ -4,7 +4,6 @@
 #include "AlignerUtils.hpp"
 
 #include <cstddef>
-#include <iostream>
 #include <ostream>
 #include <stdexcept>
 #include <tuple>
@@ -158,44 +157,24 @@ BAM::BamRecord AlnToBam(const int32_t refId, const BAM::BamHeader& header,
                         const AlignmentResult& aln, const BAM::BamRecord& read)
 {
     BAM::BamRecord record{header};
-    std::string sequence{read.Sequence()};
-
-    const bool rev{aln.rReversed};
-    int32_t clipStart = aln.qStart;
-    int32_t clipEnd = aln.qLen - aln.qEnd;
-
-    const int32_t frontIns{aln.cigar.front().Char() == 'I'};
-    const int32_t backIns{aln.cigar.back().Char() == 'I'};
-    auto cigar = aln.cigar;
-    if (frontIns || backIns) {
-        if (frontIns) {
-            if (!rev) {
-                clipStart += cigar.front().Length();
-            } else {
-                clipEnd += cigar.front().Length();
-            }
-        }
-        if (backIns) {
-            if (!rev) {
-                clipEnd += cigar.back().Length();
-            } else {
-                clipStart += cigar.back().Length();
-            }
-        }
-        decltype(cigar) newCigar;
-        newCigar.reserve(cigar.size() - frontIns - backIns);
-        for (int32_t i = frontIns; i < std::ssize(cigar) - backIns; ++i) {
-            newCigar.emplace_back(cigar[i]);
-        }
-        std::swap(newCigar, cigar);
-    }
-
-    sequence = sequence.substr(clipStart, sequence.length() - clipStart - clipEnd);
-    record.Impl().SetSequenceAndQualities(sequence);
+    record.Impl().SetSequenceAndQualities(read.Sequence());
     record.Impl().Name(read.FullName());
     record.Impl().Tags(read.Impl().Tags());
+    std::string cigarStr = aln.cigar.ToStdString();
+    int clipStart = aln.rReversed ? aln.qLen - aln.qEnd : aln.qStart;
+    int clipEnd = aln.rReversed ? aln.qStart : aln.qLen - aln.qEnd;
+    if (clipStart != 0) cigarStr = std::to_string(clipStart) + 'S' + cigarStr;
+    if (clipEnd != 0) cigarStr += std::to_string(clipEnd) + 'S';
     record.Map(refId, aln.rStart, aln.rReversed ? BAM::Strand::REVERSE : BAM::Strand::FORWARD,
-               cigar, aln.mapq);
+               BAM::Cigar::FromStdString(cigarStr), aln.mapq);
+
+    if (!aln.rReversed) {
+        record.Clip(BAM::ClipType::CLIP_TO_QUERY, read.QueryStart() + clipStart,
+                    read.QueryStart() + read.Impl().SequenceLength() - clipEnd, true);
+    } else {
+        record.Clip(BAM::ClipType::CLIP_TO_QUERY, read.QueryStart() + clipEnd,
+                    read.QueryStart() + read.Impl().SequenceLength() - clipStart, true);
+    }
     return record;
 }
 
