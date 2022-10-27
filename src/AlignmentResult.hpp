@@ -47,6 +47,6 @@ std::ostream& operator<<(std::ostream& out, const AlignmentResult& a);
 using AlnResults = std::vector<std::unique_ptr<AlignmentResult>>;
 
 BAM::BamRecord AlnToBam(const int32_t refId, const BAM::BamHeader& header,
-                        const AlignmentResult& aln, const BAM::BamRecord& read);
+                        const AlignmentResult& aln, const BAM::BamRecord& read, bool ccs);
 
 }  // namespace PacBio

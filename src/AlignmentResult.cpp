@@ -154,7 +154,7 @@ std::ostream& operator<<(std::ostream& out, const AlignmentResult& a)
 }
 
 BAM::BamRecord AlnToBam(const int32_t refId, const BAM::BamHeader& header,
-                        const AlignmentResult& aln, const BAM::BamRecord& read)
+                        const AlignmentResult& aln, const BAM::BamRecord& read, const bool ccs)
 {
     BAM::BamRecord record{header};
     record.Impl().SetSequenceAndQualities(read.Sequence());
@@ -168,12 +168,14 @@ BAM::BamRecord AlnToBam(const int32_t refId, const BAM::BamHeader& header,
     record.Map(refId, aln.rStart, aln.rReversed ? BAM::Strand::REVERSE : BAM::Strand::FORWARD,
                BAM::Cigar::FromStdString(cigarStr), aln.mapq);
 
+    const int32_t readstart = ccs ? 0 : read.QueryStart();
+
     if (!aln.rReversed) {
-        record.Clip(BAM::ClipType::CLIP_TO_QUERY, read.QueryStart() + clipStart,
-                    read.QueryStart() + read.Impl().SequenceLength() - clipEnd, true);
+        record.Clip(BAM::ClipType::CLIP_TO_QUERY, readstart + clipStart,
+                    readstart + read.Impl().SequenceLength() - clipEnd, true);
     } else {
-        record.Clip(BAM::ClipType::CLIP_TO_QUERY, read.QueryStart() + clipEnd,
-                    read.QueryStart() + read.Impl().SequenceLength() - clipStart, true);
+        record.Clip(BAM::ClipType::CLIP_TO_QUERY, readstart + clipEnd,
+                    readstart + read.Impl().SequenceLength() - clipStart, true);
     }
     return record;
 }
