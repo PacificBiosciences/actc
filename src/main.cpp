@@ -44,6 +44,14 @@ R"({
     "default" : ""
 })"
 };
+const CLI_v2::Option CcsQuery {
+R"({
+    "names" : ["ccs-query"],
+    "description" : "second file is ccs data",
+    "type" : "bool",
+    "hidden"  : true
+})"
+};
 // clang-format on
 }  // namespace OptionNames
 struct DaiDaiSettings
@@ -54,6 +62,7 @@ struct DaiDaiSettings
     int32_t NumThreads = 1;
     int32_t ChunkCur = -1;
     int32_t ChunkAll = -1;
+    bool ccsQuery = false;
 };
 
 CLI_v2::Interface CreateCLI()
@@ -90,6 +99,7 @@ CLI_v2::Interface CreateCLI()
     })"};
     i.AddPositionalArguments({InputCLRFile, InputCCSFile, Output});
     i.AddOption(OptionNames::Chunk);
+    i.AddOption(OptionNames::CcsQuery);
 
     const auto printVersion = [](const CLI_v2::Interface& interface) {
         const std::string actcVersion = []() {
@@ -157,6 +167,7 @@ int RunnerSubroutine(const CLI_v2::Results& options)
     SetBamReaderDecompThreads(options.NumThreads());
 
     DaiDaiSettings settings;
+    settings.ccsQuery = options[OptionNames::CcsQuery];
     const std::vector<std::string> files = options.PositionalArguments();
 
     const auto ReadType = [&settings](const std::string& inputFile) {
@@ -183,13 +194,17 @@ int RunnerSubroutine(const CLI_v2::Results& options)
             std::exit(EXIT_FAILURE);
         }
         if (readType == "CCS") {
-            if (!settings.InputCCSFile.empty()) {
+            if (!settings.InputCCSFile.empty() && !settings.ccsQuery) {
                 PBLOG_FATAL << "Multiple CCS files detected!";
                 PBLOG_FATAL << "1) " << settings.InputCCSFile;
                 PBLOG_FATAL << "2) " << inputFile;
                 std::exit(EXIT_FAILURE);
             }
-            settings.InputCCSFile = inputFile;
+            if (settings.InputCCSFile.empty()) {
+                settings.InputCCSFile = inputFile;
+            } else {
+                settings.InputCLRFile = inputFile;
+            }
         } else if (readType == "SUBREAD") {
             if (!settings.InputCLRFile.empty()) {
                 PBLOG_FATAL << "Multiple CLR files detected!";
@@ -371,7 +386,8 @@ int RunnerSubroutine(const CLI_v2::Results& options)
                                                 std::ref(workQueue), std::ref(writer), numCcsReads);
 
     const auto Submit = [&header](const std::vector<BAM::BamRecord>& clrRecords,
-                                  const BAM::BamRecord& ccsRecord, const int32_t curCcsIdx) {
+                                  const BAM::BamRecord& ccsRecord, const int32_t curCcsIdx,
+                                  const bool ccs) {
         const std::vector<AlnResults> alns =
             PancakeAlignerSubread(clrRecords, ccsRecord.Sequence());
         std::vector<BAM::BamRecord> alnRecords;
@@ -380,7 +396,7 @@ int RunnerSubroutine(const CLI_v2::Results& options)
             for (const auto& a : aln) {
                 if (a->isAligned) {
                     alnRecords.emplace_back(
-                        AlnToBam(curCcsIdx, header, *a, clrRecords[subreadIdx]));
+                        AlnToBam(curCcsIdx, header, *a, clrRecords[subreadIdx], ccs));
                 }
             }
             ++subreadIdx;
@@ -395,9 +411,16 @@ int RunnerSubroutine(const CLI_v2::Results& options)
         const int32_t holeNumber = ccsRecord.HoleNumber();
         if (clrRecord.HoleNumber() != holeNumber) {
             if (holenumberToOffset.find(holeNumber) == holenumberToOffset.cend()) {
-                PBLOG_FATAL << "ZMW " << holeNumber << " missing in CLR file "
-                            << clrFile.Filename();
-                std::exit(EXIT_FAILURE);
+                if (!settings.ccsQuery) {
+                    PBLOG_FATAL << "ZMW " << holeNumber << " missing in CLR file "
+                                << clrFile.Filename();
+                    std::exit(EXIT_FAILURE);
+                } else {
+                    PBLOG_WARN << "ZMW " << holeNumber << " missing in second file "
+                               << clrFile.Filename();
+                    ++curCcsIdx;
+                    continue;
+                }
             }
             PBLOG_DEBUG << "SEEKING";
             clrFile.VirtualSeek(holenumberToOffset[holeNumber]);
@@ -408,9 +431,17 @@ int RunnerSubroutine(const CLI_v2::Results& options)
             PBLOG_DEBUG << "CLR : " << clrRecord.FullName();
             clrRecords.emplace_back(clrRecord);
             GetNextRecord();
+            // TODO this is required because the do while loop has a known bug:
+            //   If the query bam contains only one hole, the loop goes inf. The by-strand case is one hole.
+            if (settings.ccsQuery) {
+                if (clrRecords.size() > 1) {
+                    break;
+                }
+            }
         } while (clrRecord.HoleNumber() == holeNumber);
 
-        workQueue.ProduceWith(Submit, std::move(clrRecords), ccsRecord, curCcsIdx);
+        workQueue.ProduceWith(Submit, std::move(clrRecords), ccsRecord, curCcsIdx,
+                              settings.ccsQuery);
 
         ++curCcsIdx;
     }
