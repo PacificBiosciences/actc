@@ -49,3 +49,7 @@ actc_lib_deps = [
 ]
 
 subdir('src')
+
+pbdc_clang_formatter = find_program('tools/check-formatting')
+pbdc_cram_script = find_program('scripts/cram')
+subdir('tests')
