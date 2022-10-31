@@ -1,6 +1,7 @@
 pbdc_test_samtools = find_program('samtools')
 
 pbdc_cram_tests = [
+  'single',
   'tiny',
 ]
 

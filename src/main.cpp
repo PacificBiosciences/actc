@@ -288,17 +288,6 @@ int RunnerSubroutine(const CLI_v2::Results& options)
 
     BAM::BamRecord clrRecord;
     clrFile.GetNext(clrRecord);
-    const int32_t firstHoleNumber = clrRecord.HoleNumber();
-    const auto GetNextRecord = [&]() {
-        if (!clrFile.GetNext(clrRecord)) {
-            PBLOG_VERBOSE << "End of CLR file, rewind";
-            clrFile.VirtualSeek(holenumberToOffset[firstHoleNumber]);
-            if (!clrFile.GetNext(clrRecord)) {
-                PBLOG_FATAL << "I'm confused, no data in CLR file";
-                std::exit(EXIT_FAILURE);
-            }
-        }
-    };
 
     const std::string ccsFileName = ccsFiles[0].Filename();
 
@@ -424,19 +413,14 @@ int RunnerSubroutine(const CLI_v2::Results& options)
             }
             PBLOG_DEBUG << "SEEKING";
             clrFile.VirtualSeek(holenumberToOffset[holeNumber]);
-            GetNextRecord();
+            clrFile.GetNext(clrRecord);
         }
         std::vector<BAM::BamRecord> clrRecords;
         do {
             PBLOG_DEBUG << "CLR : " << clrRecord.FullName();
             clrRecords.emplace_back(clrRecord);
-            GetNextRecord();
-            // TODO this is required because the do while loop has a known bug:
-            //   If the query bam contains only one hole, the loop goes inf. The by-strand case is one hole.
-            if (settings.ccsQuery) {
-                if (clrRecords.size() > 1) {
-                    break;
-                }
+            if (!clrFile.GetNext(clrRecord)) {
+                break;
             }
         } while (clrRecord.HoleNumber() == holeNumber);
 
