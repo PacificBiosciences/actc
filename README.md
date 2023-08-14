@@ -60,7 +60,11 @@ To generate the BAM index
     pbindex movie.subreads.bam
 
 # Changelog
-  * **0.2.0**
+  * 0.4.0
+    * Accept REVIO files
+  * 0.3.0
+    * Properly handle flanks
+  * 0.2.0
     * Improve runtime and reduce memory footprint for low-complexity molecules
   * 0.1.0
     * Add _actc_ `@PG` to BAM header

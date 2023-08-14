@@ -28,7 +28,8 @@ AlignmentResult::AlignmentResult(int32_t rIdArg, bool rReversedArg, int64_t rSta
     , isAligned{isAlignedArg}
     , isSupplementary{isSupplementaryArg}
     , isSecondary{isSecondaryArg}
-{}
+{
+}
 
 AlignmentResult::AlignmentResult(bool rReversedArg, int64_t rStartArg, int64_t rEndArg,
                                  int64_t qStartArg, int64_t qEndArg, int64_t qLenArg,
@@ -36,7 +37,8 @@ AlignmentResult::AlignmentResult(bool rReversedArg, int64_t rStartArg, int64_t r
     : AlignmentResult{0,       rReversedArg,        rStartArg, rEndArg, qStartArg, qEndArg,
                       qLenArg, std::move(cigarArg), 60,        0,       true,      false,
                       false}
-{}
+{
+}
 
 std::unique_ptr<AlignmentResult> AlignmentResult::Clip(int64_t frontClipQuery,
                                                        int64_t backClipQuery, int64_t frontClipRef,
@@ -165,8 +167,8 @@ BAM::BamRecord AlnToBam(const int32_t refId, const BAM::BamHeader& header,
     int clipEnd = aln.rReversed ? aln.qStart : aln.qLen - aln.qEnd;
     if (clipStart != 0) cigarStr = std::to_string(clipStart) + 'S' + cigarStr;
     if (clipEnd != 0) cigarStr += std::to_string(clipEnd) + 'S';
-    record.Map(refId, aln.rStart, aln.rReversed ? BAM::Strand::REVERSE : BAM::Strand::FORWARD,
-               BAM::Cigar::FromStdString(cigarStr), aln.mapq);
+    record.Map(refId, aln.rStart, aln.rReversed ? Data::Strand::REVERSE : Data::Strand::FORWARD,
+               Data::Cigar::FromStdString(cigarStr), aln.mapq);
 
     const int32_t readstart = ccs ? 0 : read.QueryStart();
 
