@@ -24,6 +24,8 @@ actc_main = executable(
     'AlignerUtils.cpp',
     'LibraryInfo.cpp',
     'PancakeAligner.cpp',
+    'io/BamZmwReader.cpp',
+    'io/BamZmwReaderConfig.cpp',
   ]) + actc_gen_headers,
   install : true,
   dependencies : actc_lib_deps,

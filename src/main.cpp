@@ -1,6 +1,9 @@
 #include "AlignmentResult.hpp"
 #include "LibraryInfo.hpp"
 #include "PancakeAligner.hpp"
+#include "io/BamZmwReader.hpp"
+#include "io/BamZmwReaderConfig.hpp"
+#include "io/ZmwRecords.hpp"
 
 #include <htslib/hts.h>
 #include <pbbam/BamReader.h>
@@ -28,6 +31,7 @@
 #include <cstdlib>
 #include <iomanip>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -36,14 +40,6 @@
 namespace PacBio {
 namespace OptionNames {
 // clang-format off
-const CLI_v2::Option Chunk {
-R"({
-    "names" : ["chunk"],
-    "description" : "Operate on a single chunk. Format i/N, where i in [1,N]. Examples: 3/24 or 9/9",
-    "type" : "string",
-    "default" : ""
-})"
-};
 const CLI_v2::Option CcsQuery {
 R"({
     "names" : ["ccs-query"],
@@ -54,7 +50,7 @@ R"({
 };
 // clang-format on
 }  // namespace OptionNames
-struct DaiDaiSettings
+struct ActcSettings
 {
     std::string InputCLRFile;
     std::string InputCCSFile;
@@ -74,6 +70,9 @@ CLI_v2::Interface CreateCLI()
     logConfig.Header = "| ";
     logConfig.Delimiter = " | ";
     logConfig.Fields = Logging::LogField::TIMESTAMP | Logging::LogField::LOG_LEVEL;
+    logConfig.Level = Logging::LogLevel::INFO;
+    logConfig.LeftBlockWidth = 14;
+    logConfig.AlignLevel = true;
     i.LogConfig(logConfig);
 
     const CLI_v2::PositionalArgument InputCLRFile{
@@ -98,7 +97,8 @@ CLI_v2::Interface CreateCLI()
         "required" : true
     })"};
     i.AddPositionalArguments({InputCLRFile, InputCCSFile, Output});
-    i.AddOption(OptionNames::Chunk);
+    i.AddOption(IO::OptionNames::Chunk);
+
     i.AddOption(OptionNames::CcsQuery);
 
     const auto printVersion = [](const CLI_v2::Interface& interface) {
@@ -137,13 +137,15 @@ void WorkerThread(Parallel::WorkQueue<std::vector<BAM::BamRecord>>& queue, BAM::
                   const int32_t numReads)
 {
     int32_t counter = 0;
-    double perc = 0.1;
+    double perc = 0;
 
     auto LambdaWorker = [&](std::vector<BAM::BamRecord>&& ps) {
         ++counter;
-        if (1.0 * counter / numReads > perc) {
-            PBLOG_INFO << "Progress " << 100 * perc << '%';
-            perc = std::min(perc + 0.1, 1.0);
+        if (1.0 * counter / numReads > (perc + 0.001)) {
+            perc = counter * 1.0 / numReads;
+            std::ostringstream ss;
+            ss << std::fixed << std::setprecision(2) << 100 * perc << '%';
+            PBLOG_BLOCK_INFO("Progress", ss.str());
         }
         for (const auto& record : ps) {
             writer.Write(record);
@@ -166,14 +168,14 @@ int RunnerSubroutine(const CLI_v2::Results& options)
     Utility::Stopwatch globalTimer;
     SetBamReaderDecompThreads(options.NumThreads());
 
-    DaiDaiSettings settings;
+    ActcSettings settings;
     settings.ccsQuery = options[OptionNames::CcsQuery];
     const std::vector<std::string> files = options.PositionalArguments();
 
     const auto ReadType = [&settings](const std::string& inputFile) {
         const auto bamFiles = BAM::DataSet(inputFile).BamFiles();
         if (bamFiles.empty()) {
-            PBLOG_FATAL << "No BAM files available for: " << inputFile;
+            PBLOG_BLOCK_FATAL("Input checker", "No BAM files available for: " + inputFile);
             std::exit(EXIT_FAILURE);
         }
 
@@ -183,21 +185,24 @@ int RunnerSubroutine(const CLI_v2::Results& options)
                 if (readType.empty()) {
                     readType = rg.ReadType();
                 } else if (readType != rg.ReadType()) {
-                    PBLOG_FATAL << "Do not mix and match different read types for input file : "
-                                << inputFile;
+                    PBLOG_BLOCK_FATAL(
+                        "Input checker",
+                        "Do not mix and match different read types for input file : " + inputFile);
                     std::exit(EXIT_FAILURE);
                 }
             }
         }
         if (readType.empty()) {
-            PBLOG_FATAL << "Could not determine read type, read groups are missing : " << inputFile;
+            PBLOG_BLOCK_FATAL(
+                "Input checker",
+                "Could not determine read type, read groups are missing : " + inputFile);
             std::exit(EXIT_FAILURE);
         }
         if (readType == "CCS") {
             if (!settings.InputCCSFile.empty() && !settings.ccsQuery) {
-                PBLOG_FATAL << "Multiple CCS files detected!";
-                PBLOG_FATAL << "1) " << settings.InputCCSFile;
-                PBLOG_FATAL << "2) " << inputFile;
+                PBLOG_BLOCK_FATAL("Input checker", "Multiple CCS files detected!");
+                PBLOG_BLOCK_FATAL("Input checker", "1) " + settings.InputCCSFile);
+                PBLOG_BLOCK_FATAL("Input checker", "2) " + inputFile);
                 std::exit(EXIT_FAILURE);
             }
             if (settings.InputCCSFile.empty()) {
@@ -207,14 +212,14 @@ int RunnerSubroutine(const CLI_v2::Results& options)
             }
         } else if (readType == "SUBREAD") {
             if (!settings.InputCLRFile.empty()) {
-                PBLOG_FATAL << "Multiple CLR files detected!";
-                PBLOG_FATAL << "1) " << settings.InputCLRFile;
-                PBLOG_FATAL << "2) " << inputFile;
+                PBLOG_BLOCK_FATAL("Input checker", "Multiple CLR files detected!");
+                PBLOG_BLOCK_FATAL("Input checker", "1) " + settings.InputCLRFile);
+                PBLOG_BLOCK_FATAL("Input checker", "2) " + inputFile);
                 std::exit(EXIT_FAILURE);
             }
             settings.InputCLRFile = inputFile;
         } else {
-            PBLOG_FATAL << "Unknown read type in : " << inputFile;
+            PBLOG_BLOCK_FATAL("Input checker", "Unknown read type in : " + inputFile);
             std::exit(EXIT_FAILURE);
         }
     };
@@ -224,44 +229,21 @@ int RunnerSubroutine(const CLI_v2::Results& options)
     settings.OutputAlignmentFile = files[2];
     settings.NumThreads = options.NumThreads();
 
-    const std::string chunk = options[OptionNames::Chunk];
-    const auto ChunkErrorAndDie = [&]() {
-        PBLOG_FATAL << "Wrong format for --chunk, please provide two integers separated by a slash "
-                       "like 2/10. First number must be less than the second number. Both must be "
-                       "positive and greater than 0.";
-        std::exit(EXIT_FAILURE);
-    };
-    if (!chunk.empty()) {
-        if (boost::find_first(chunk, "/")) {
-            std::vector<std::string> splits;
-            boost::split(splits, chunk, boost::is_any_of("/"));
-            if (splits.size() != 2) {
-                ChunkErrorAndDie();
-            }
-            try {
-                settings.ChunkCur = boost::lexical_cast<float>(splits[0]);
-                settings.ChunkAll = boost::lexical_cast<float>(splits[1]);
-                if (settings.ChunkCur > settings.ChunkAll || settings.ChunkCur <= 0 ||
-                    settings.ChunkAll <= 0)
-                    ChunkErrorAndDie();
-            } catch (boost::bad_lexical_cast&) {
-                ChunkErrorAndDie();
-            }
-        } else {
-            ChunkErrorAndDie();
-        }
-    }
+    IO::BamZmwReaderConfig zmwReaderConfig{options};
 
     const auto clrFiles = BAM::DataSet(settings.InputCLRFile).BamFiles();
     if (clrFiles.size() != 1) {
-        PBLOG_FATAL << "CLR input must be exactly one BAM file! Found " << clrFiles.size();
+        PBLOG_BLOCK_FATAL("Input checker", "CLR input must be exactly one BAM file! Found " +
+                                               std::to_string(clrFiles.size()));
         std::exit(EXIT_FAILURE);
     }
 
     if (!clrFiles[0].PacBioIndexExists()) {
-        PBLOG_FATAL << "Missing PBI file for " << clrFiles[0].Filename();
-        PBLOG_FATAL << "Please generate one with : pbindex " << clrFiles[0].Filename();
-        PBLOG_FATAL << "You can get pbindex from bioconda: conda install -c bioconda pbbam";
+        PBLOG_BLOCK_FATAL("Input checker", "Missing PBI file for " + clrFiles[0].Filename());
+        PBLOG_BLOCK_FATAL("Input checker",
+                          "Please generate one with : pbindex " + clrFiles[0].Filename());
+        PBLOG_BLOCK_FATAL("Input checker",
+                          "You can get pbindex from bioconda: conda install -c bioconda pbbam");
         std::exit(EXIT_FAILURE);
     }
 
@@ -280,70 +262,17 @@ int RunnerSubroutine(const CLI_v2::Results& options)
     }
 
     BAM::BamReader clrFile{clrFiles[0].Filename()};
-    auto ccsFiles = BAM::DataSet(settings.InputCCSFile).BamFiles();
-    if (ccsFiles.size() != 1) {
-        PBLOG_FATAL << "Expecting exactly one CCS BAM file, found " << ccsFiles.size();
-        std::exit(EXIT_FAILURE);
+    {
+        auto ccsFiles = BAM::DataSet(settings.InputCCSFile).BamFiles();
+        if (ccsFiles.size() != 1) {
+            PBLOG_BLOCK_FATAL("Input checker", "Expecting exactly one CCS BAM file, found " +
+                                                   std::to_string(ccsFiles.size()));
+            std::exit(EXIT_FAILURE);
+        }
     }
 
     BAM::BamRecord clrRecord;
     clrFile.GetNext(clrRecord);
-
-    const std::string ccsFileName = ccsFiles[0].Filename();
-
-    auto filter = BAM::PbiFilter::FromDataSet(ccsFileName);
-    if (settings.ChunkCur != -1) {
-        if (!ccsFiles[0].PacBioIndexExists()) {
-            PBLOG_FATAL
-                << "PBI file is missing for input BAM file! Please create one using pbindex!";
-            std::exit(EXIT_FAILURE);
-        }
-        const BAM::PbiRawData index{ccsFiles[0].PacBioIndexFilename()};
-        const auto& zmwsUniq = index.BasicData().holeNumber_;
-        const int32_t numRecords = zmwsUniq.size();
-        if (numRecords == 0) {
-            PBLOG_FATAL << "InputDataError: No input records in PBI file!";
-            std::exit(EXIT_FAILURE);
-        }
-
-        const bool firstChunk = settings.ChunkCur == 1;
-        const bool lastChunk = settings.ChunkCur == settings.ChunkAll && settings.ChunkAll > 0;
-        if (settings.ChunkCur > 0 && settings.ChunkAll > 0) {
-            if (!filter.IsEmpty()) {
-                PBLOG_FATAL << "Cannot combine dataset filters with --chunk. Please use ZMW "
-                               "chunking via dataset filters or remove filters from dataset.";
-            }
-
-            int numZmwsAll = zmwsUniq.size();
-            if (numZmwsAll < settings.ChunkAll) {
-                PBLOG_FATAL << "Fewer ZMWs available than specified chunks: " << numZmwsAll
-                            << " vs. " << settings.ChunkAll;
-            }
-            const double chunkSize = 1.0 * numZmwsAll / settings.ChunkAll;
-            const int32_t firstChunkIdx =
-                firstChunk ? 0 : std::round(chunkSize * (settings.ChunkCur - 1));
-            int32_t startZmw = zmwsUniq[firstChunkIdx];
-            const int32_t lastChunkIdx =
-                lastChunk ? zmwsUniq.size() - 1 : std::round(chunkSize * (settings.ChunkCur));
-            int32_t endZmw = zmwsUniq[lastChunkIdx];
-            int32_t numZmws = lastChunkIdx - firstChunkIdx + static_cast<int32_t>(lastChunk);
-            PBLOG_INFO << "Chunk index : " << settings.ChunkCur << '/' << settings.ChunkAll;
-            PBLOG_INFO << "ZMW range   : [" << startZmw << ',' << endZmw << (lastChunk ? ']' : ')');
-            PBLOG_INFO << "#ZMWs       : " << numZmws;
-
-            const BAM::PbiZmwFilter startFilter{startZmw, BAM::Compare::GREATER_THAN_EQUAL};
-            const BAM::PbiZmwFilter endFilter{
-                endZmw, lastChunk ? BAM::Compare::LESS_THAN_EQUAL : BAM::Compare::LESS_THAN};
-            filter = BAM::PbiFilter::Intersection({startFilter, endFilter});
-        }
-    }
-
-    const auto CreateCCSReader = [&]() -> std::unique_ptr<BAM::internal::IQuery> {
-        if (filter.IsEmpty())
-            return std::make_unique<BAM::EntireFileQuery>(ccsFileName);
-        else
-            return std::make_unique<BAM::PbiFilterQuery>(filter, ccsFileName);
-    };
 
     BAM::BamHeader header = clrFile.Header().DeepCopy();
     int32_t numCcsReads = 0;
@@ -351,8 +280,23 @@ int RunnerSubroutine(const CLI_v2::Results& options)
         std::string outputFastaName = settings.OutputAlignmentFile;
         boost::replace_all(outputFastaName, ".bam", ".fasta");
         BAM::FastaWriter fasta{outputFastaName};
-        const auto ccsReader = CreateCCSReader();
-        for (const auto& ccsRecord : *ccsReader) {
+        IO::BamZmwReader ccsReader{settings.InputCCSFile, zmwReaderConfig};
+
+        IO::ZmwRecords zmwRecords;
+        while (ccsReader.GetNext(zmwRecords)) {
+            if (zmwRecords.InputRecords.empty()) {
+                PBLOG_BLOCK_FATAL("CCS reader", "CCS ZMW " + std::to_string(zmwRecords.HoleNumber) +
+                                                    " has no records!");
+                continue;
+            }
+
+            if (std::ssize(zmwRecords.InputRecords) != 1) {
+                PBLOG_BLOCK_FATAL("CCS reader", "CCS ZMW " + std::to_string(zmwRecords.HoleNumber) +
+                                                    " has multiple records. Ignoring ZMW!");
+                continue;
+            }
+
+            const auto ccsRecord = zmwRecords.InputRecords[0];
             const std::string seq = ccsRecord.Sequence();
             const std::string name = ccsRecord.FullName();
             header.AddSequence({name, std::to_string(seq.size())});
@@ -394,30 +338,47 @@ int RunnerSubroutine(const CLI_v2::Results& options)
     };
 
     int32_t curCcsIdx = 0;
-    const auto ccsReader = CreateCCSReader();
-    for (const auto& ccsRecord : *ccsReader) {
-        PBLOG_DEBUG << "CCS : " << ccsRecord.FullName();
+    IO::BamZmwReader ccsReader{settings.InputCCSFile, zmwReaderConfig};
+    IO::ZmwRecords zmwRecords;
+    while (ccsReader.GetNext(zmwRecords)) {
+        if (zmwRecords.InputRecords.empty()) {
+            PBLOG_BLOCK_FATAL("CCS reader", "CCS ZMW " + std::to_string(zmwRecords.HoleNumber) +
+                                                " has no records!");
+            continue;
+        }
+
+        if (std::ssize(zmwRecords.InputRecords) != 1) {
+            PBLOG_BLOCK_FATAL("CCS reader", "CCS ZMW " + std::to_string(zmwRecords.HoleNumber) +
+                                                " has multiple records. Ignoring ZMW!");
+            continue;
+        }
+
+        const auto ccsRecord = zmwRecords.InputRecords[0];
+
+        PBLOG_BLOCK_DEBUG("CCS reader", ccsRecord.FullName());
         const int32_t holeNumber = ccsRecord.HoleNumber();
         if (clrRecord.HoleNumber() != holeNumber) {
             if (holenumberToOffset.find(holeNumber) == holenumberToOffset.cend()) {
                 if (!settings.ccsQuery) {
-                    PBLOG_FATAL << "ZMW " << holeNumber << " missing in CLR file "
-                                << clrFile.Filename();
+                    PBLOG_BLOCK_FATAL("CLR reader", "ZMW " + std::to_string(holeNumber) +
+                                                        " missing in CLR file )" +
+                                                        clrFile.Filename());
                     std::exit(EXIT_FAILURE);
                 } else {
-                    PBLOG_WARN << "ZMW " << holeNumber << " missing in second file "
-                               << clrFile.Filename();
+                    PBLOG_BLOCK_WARN("CLR reader", "ZMW " + std::to_string(holeNumber) +
+                                                       " missing in second file )" +
+                                                       clrFile.Filename());
                     ++curCcsIdx;
                     continue;
                 }
             }
-            PBLOG_DEBUG << "SEEKING";
+            PBLOG_BLOCK_DEBUG("CLR parser", "SEEKING");
             clrFile.VirtualSeek(holenumberToOffset[holeNumber]);
             clrFile.GetNext(clrRecord);
         }
         std::vector<BAM::BamRecord> clrRecords;
         do {
-            PBLOG_DEBUG << "CLR : " << clrRecord.FullName();
+            PBLOG_BLOCK_DEBUG("CLR parser", clrRecord.FullName());
             clrRecords.emplace_back(clrRecord);
             if (!clrFile.GetNext(clrRecord)) {
                 break;
@@ -435,14 +396,15 @@ int RunnerSubroutine(const CLI_v2::Results& options)
     workQueue.Finalize();
 
     globalTimer.Freeze();
-    PBLOG_INFO << "Run Time : " << globalTimer.ElapsedTime();
-    PBLOG_INFO << "CPU Time : "
-               << Utility::Stopwatch::PrettyPrintNanoseconds(
-                      static_cast<int64_t>(Utility::Stopwatch::CpuTime() * 1000 * 1000 * 1000));
+    PBLOG_BLOCK_INFO("Run Time", globalTimer.ElapsedTime());
+    PBLOG_BLOCK_INFO("CPU Time", Utility::Stopwatch::PrettyPrintNanoseconds(static_cast<int64_t>(
+                                     Utility::Stopwatch::CpuTime() * 1000 * 1000 * 1000)));
 
     int64_t const peakRss = PacBio::Utility::MemoryConsumption::PeakRss();
     double const peakRssGb = peakRss / 1024.0 / 1024.0 / 1024.0;
-    PBLOG_INFO << "Peak RSS : " << std::fixed << std::setprecision(3) << peakRssGb << " GB";
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(3) << peakRssGb << " GB";
+    PBLOG_BLOCK_INFO("Peak RSS", ss.str());
 
     return EXIT_SUCCESS;
 }

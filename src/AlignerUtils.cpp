@@ -54,7 +54,7 @@ double CalcAlignmentIdentity(const Data::Cigar& cigar)
     int64_t num_eq = 0;
     int64_t num_x = 0;
     int64_t num_ins = 0;
-    int64_t num_del = 0;
+    // int64_t num_del = 0;
 
     for (const auto& cigar_op : cigar) {
         const auto op = cigar_op.Type();
@@ -71,10 +71,9 @@ double CalcAlignmentIdentity(const Data::Cigar& cigar)
                 num_ins += count;
                 break;
             case Data::CigarOperationType::DELETION:
-                num_del += count;
+                // num_del += count;
                 break;
             default:
-                // PBLOG_DEBUG << "Unknown CIGAR operation encountered. Returning 0.0 instead of identity.\n";
                 return 0.0;
         }
     }
