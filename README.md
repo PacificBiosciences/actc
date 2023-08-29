@@ -60,6 +60,8 @@ To generate the BAM index
     pbindex movie.subreads.bam
 
 # Changelog
+  * 0.5.0
+    * Allow unsorted uBAM CCS input
   * 0.4.0
     * Accept REVIO files
   * 0.3.0
