@@ -283,7 +283,11 @@ int RunnerSubroutine(const CLI_v2::Results& options)
         IO::BamZmwReader ccsReader{settings.InputCCSFile, zmwReaderConfig};
 
         IO::ZmwRecords zmwRecords;
+        PBLOG_BLOCK_INFO("Fasta CCS", "Start writing CCS reads to " + outputFastaName);
         while (ccsReader.GetNext(zmwRecords)) {
+            if ((numCcsReads % 10000) == 0) {
+                PBLOG_BLOCK_INFO("Fasta CCS", std::to_string(numCcsReads));
+            }
             if (zmwRecords.InputRecords.empty()) {
                 PBLOG_BLOCK_FATAL("CCS reader", "CCS ZMW " + std::to_string(zmwRecords.HoleNumber) +
                                                     " has no records!");
@@ -303,6 +307,7 @@ int RunnerSubroutine(const CLI_v2::Results& options)
             fasta.Write(name, seq);
             ++numCcsReads;
         }
+        PBLOG_BLOCK_INFO("Fasta CCS", std::to_string(numCcsReads));
     }
 
     BAM::ProgramInfo program("actc");

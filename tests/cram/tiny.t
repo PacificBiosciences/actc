@@ -1,4 +1,4 @@
-  $ ${ACTC} ${TESTDIR}"/../data/tiny.clr.bam" "${TESTDIR}"/../data/tiny.ccs.bam tiny.actc.bam
+  $ ${ACTC} ${TESTDIR}"/../data/tiny.clr.bam" "${TESTDIR}"/../data/tiny.ccs.bam tiny.actc.bam  --log-level WARN
   $ samtools view -c tiny.actc.bam
   68
 
