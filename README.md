@@ -60,6 +60,9 @@ To generate the BAM index
     pbindex movie.subreads.bam
 
 # Changelog
+  * 0.6.0
+    * Add `--trim-flanks-bp` to clip N bases from each flank
+    * Add `--min-ccs-length`, trimmed CCS reads shorter than N bp are ignored
   * 0.5.0
     * Allow unsorted uBAM CCS input
   * 0.4.0
