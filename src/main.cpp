@@ -43,9 +43,25 @@ namespace OptionNames {
 const CLI_v2::Option CcsQuery {
 R"({
     "names" : ["ccs-query"],
-    "description" : "second file is ccs data",
+    "description" : "Second file is CCS data",
     "type" : "bool",
-    "hidden"  : true
+    "hidden" : true
+})"
+};
+const CLI_v2::Option TrimFlanksBp {
+R"({
+    "names" : ["trim-flanks-bp"],
+    "description" : "Trim N bp from each flank of the CCS read alignment",
+    "type" : "int",
+    "default" : 0
+})"
+};
+const CLI_v2::Option MinCCSLength {
+R"({
+    "names" : ["min-ccs-length"],
+    "description" : "Minimum CCS read length after --trim-flanks-bp",
+    "type" : "int",
+    "default" : 100
 })"
 };
 // clang-format on
@@ -55,10 +71,12 @@ struct ActcSettings
     std::string InputCLRFile;
     std::string InputCCSFile;
     std::string OutputAlignmentFile;
-    int32_t NumThreads = 1;
-    int32_t ChunkCur = -1;
-    int32_t ChunkAll = -1;
-    bool ccsQuery = false;
+    int32_t NumThreads{1};
+    int32_t ChunkCur{-1};
+    int32_t ChunkAll{-1};
+    int32_t TrimFlanksBp{0};
+    int32_t MinCCSLength{0};
+    bool CcsQuery{false};
 };
 
 CLI_v2::Interface CreateCLI()
@@ -100,6 +118,8 @@ CLI_v2::Interface CreateCLI()
     i.AddOption(IO::OptionNames::Chunk);
 
     i.AddOption(OptionNames::CcsQuery);
+    i.AddOption(OptionNames::TrimFlanksBp);
+    i.AddOption(OptionNames::MinCCSLength);
 
     const auto printVersion = [](const CLI_v2::Interface& interface) {
         const std::string actcVersion = []() {
@@ -169,7 +189,9 @@ int RunnerSubroutine(const CLI_v2::Results& options)
     SetBamReaderDecompThreads(options.NumThreads());
 
     ActcSettings settings;
-    settings.ccsQuery = options[OptionNames::CcsQuery];
+    settings.CcsQuery = options[OptionNames::CcsQuery];
+    settings.TrimFlanksBp = options[OptionNames::TrimFlanksBp];
+    settings.MinCCSLength = options[OptionNames::MinCCSLength];
     const std::vector<std::string> files = options.PositionalArguments();
 
     const auto ReadType = [&settings](const std::string& inputFile) {
@@ -199,7 +221,7 @@ int RunnerSubroutine(const CLI_v2::Results& options)
             std::exit(EXIT_FAILURE);
         }
         if (readType == "CCS") {
-            if (!settings.InputCCSFile.empty() && !settings.ccsQuery) {
+            if (!settings.InputCCSFile.empty() && !settings.CcsQuery) {
                 PBLOG_BLOCK_FATAL("Input checker", "Multiple CCS files detected!");
                 PBLOG_BLOCK_FATAL("Input checker", "1) " + settings.InputCCSFile);
                 PBLOG_BLOCK_FATAL("Input checker", "2) " + inputFile);
@@ -230,6 +252,8 @@ int RunnerSubroutine(const CLI_v2::Results& options)
     settings.NumThreads = options.NumThreads();
 
     IO::BamZmwReaderConfig zmwReaderConfig{options};
+    const std::int32_t trimBothFlanksBp = 2 * settings.TrimFlanksBp;
+    const std::int32_t minCCSLength = settings.MinCCSLength + trimBothFlanksBp;
 
     const auto clrFiles = BAM::DataSet(settings.InputCLRFile).BamFiles();
     if (clrFiles.size() != 1) {
@@ -301,10 +325,20 @@ int RunnerSubroutine(const CLI_v2::Results& options)
             }
 
             const auto ccsRecord = zmwRecords.InputRecords[0];
-            const std::string seq = ccsRecord.Sequence();
+            std::string ccsSeq = ccsRecord.Sequence();
+            std::int32_t ccsSeqLen = std::ssize(ccsSeq);
+            if (ccsSeqLen < minCCSLength) {
+                PBLOG_BLOCK_DEBUG(
+                    "CCS reader",
+                    "CCS ZMW " + std::to_string(zmwRecords.HoleNumber) +
+                        " has sequence shorter than --min-ccs-length + 2 * --trim-flanks-bp!");
+                continue;
+            }
+            ccsSeq = ccsSeq.substr(settings.TrimFlanksBp, ccsSeqLen - trimBothFlanksBp);
+            ccsSeqLen = std::ssize(ccsSeq);
             const std::string name = ccsRecord.FullName();
-            header.AddSequence({name, std::to_string(seq.size())});
-            fasta.Write(name, seq);
+            header.AddSequence({name, std::to_string(ccsSeqLen)});
+            fasta.Write(name, ccsSeq);
             ++numCcsReads;
         }
         PBLOG_BLOCK_INFO("Fasta CCS", std::to_string(numCcsReads));
@@ -323,24 +357,32 @@ int RunnerSubroutine(const CLI_v2::Results& options)
     std::future<void> workerThread = std::async(std::launch::async, WorkerThread,
                                                 std::ref(workQueue), std::ref(writer), numCcsReads);
 
-    const auto Submit = [&header](const std::vector<BAM::BamRecord>& clrRecords,
-                                  const BAM::BamRecord& ccsRecord, const int32_t curCcsIdx,
-                                  const bool ccs) {
-        const std::vector<AlnResults> alns =
-            PancakeAlignerSubread(clrRecords, ccsRecord.Sequence());
-        std::vector<BAM::BamRecord> alnRecords;
-        int32_t subreadIdx = 0;
-        for (const auto& aln : alns) {
-            for (const auto& a : aln) {
-                if (a->isAligned) {
-                    alnRecords.emplace_back(
-                        AlnToBam(curCcsIdx, header, *a, clrRecords[subreadIdx], ccs));
-                }
+    const auto Submit =
+        [&header](const std::vector<BAM::BamRecord>& clrRecords, const BAM::BamRecord& ccsRecord,
+                  const int32_t curCcsIdx, const bool ccs, const int32_t trimFlanksBp,
+                  const std::int32_t minCCSLength, const std::int32_t trimBothFlanksBp) {
+            std::vector<BAM::BamRecord> alnRecords;
+
+            std::string ccsSeq = ccsRecord.Sequence();
+            std::int32_t ccsSeqLen = std::ssize(ccsSeq);
+            if (ccsSeqLen < minCCSLength) {
+                return alnRecords;
             }
-            ++subreadIdx;
-        }
-        return alnRecords;
-    };
+            ccsSeq = ccsSeq.substr(trimFlanksBp, ccsSeqLen - trimBothFlanksBp);
+
+            const std::vector<AlnResults> alns = PancakeAlignerSubread(clrRecords, ccsSeq);
+            int32_t subreadIdx = 0;
+            for (const auto& aln : alns) {
+                for (const auto& a : aln) {
+                    if (a->isAligned) {
+                        alnRecords.emplace_back(
+                            AlnToBam(curCcsIdx, header, *a, clrRecords[subreadIdx], ccs));
+                    }
+                }
+                ++subreadIdx;
+            }
+            return alnRecords;
+        };
 
     int32_t curCcsIdx = 0;
     IO::BamZmwReader ccsReader{settings.InputCCSFile, zmwReaderConfig};
@@ -364,7 +406,7 @@ int RunnerSubroutine(const CLI_v2::Results& options)
         const int32_t holeNumber = ccsRecord.HoleNumber();
         if (clrRecord.HoleNumber() != holeNumber) {
             if (holenumberToOffset.find(holeNumber) == holenumberToOffset.cend()) {
-                if (!settings.ccsQuery) {
+                if (!settings.CcsQuery) {
                     PBLOG_BLOCK_FATAL("CLR reader", "ZMW " + std::to_string(holeNumber) +
                                                         " missing in CLR file )" +
                                                         clrFile.Filename());
@@ -391,7 +433,8 @@ int RunnerSubroutine(const CLI_v2::Results& options)
         } while (clrRecord.HoleNumber() == holeNumber);
 
         workQueue.ProduceWith(Submit, std::move(clrRecords), ccsRecord, curCcsIdx,
-                              settings.ccsQuery);
+                              settings.CcsQuery, settings.TrimFlanksBp, minCCSLength,
+                              trimBothFlanksBp);
 
         ++curCcsIdx;
     }
