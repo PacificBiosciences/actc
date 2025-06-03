@@ -402,6 +402,11 @@ int RunnerSubroutine(const CLI_v2::Results& options)
 
         const auto ccsRecord = zmwRecords.InputRecords[0];
 
+        // skip short length ccs records
+        if (std::ssize(ccsRecord.Sequence()) < minCCSLength) {
+            continue;
+        }
+
         PBLOG_BLOCK_DEBUG("CCS reader", ccsRecord.FullName());
         const int32_t holeNumber = ccsRecord.HoleNumber();
         if (clrRecord.HoleNumber() != holeNumber) {
